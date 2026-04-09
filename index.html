@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="coffee">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT Word Aligner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Alyamama&family=Funnel+Sans:ital,wght@0,300..800;1,300..800&family=SUSE+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        try {
+            var _v = localStorage.getItem('stt-align-ui-theme');
+            if (/^(coffee|ocean|slate)$/.test(_v)) document.documentElement.setAttribute('data-theme', _v);
+        } catch (e) {}
+    </script>
+</head>
+<body class="min-h-screen antialiased">
+
+    <main class="mx-auto max-w-lg w-full px-4 py-10 md:py-12">
+
+        <div class="mb-4 flex items-center justify-between gap-3">
+            <div class="min-w-0 flex-1">
+                <button type="button" id="navPrimaryBtn" class="hidden flex items-center gap-1.5 text-sm font-medium text-fg transition hover:opacity-80">
+                    <svg class="h-4 w-4 shrink-0 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M15 18l-6-6 6-6"/>
+                    </svg>
+                    <span id="navPrimaryLabel"></span>
+                </button>
+            </div>
+            <div id="navRightActions" class="flex shrink-0 items-center gap-2">
+                <button type="button" id="loadDemoBtn" class="btn-secondary btn--plain btn--load-demo rounded-lg px-3 py-2 text-sm font-medium" title="Open bundled demo in alignment preview">Load demo</button>
+                <button type="button" id="infoBtn" class="btn-secondary btn--plain rounded-lg px-3 py-2 text-sm font-medium">Info</button>
+            </div>
+        </div>
+
+        <div id="editPanel">
+            <header class="page-head mb-8">
+                <h1 class="text-xl tracking-tight text-fg">Word aligner</h1>
+                <p class="mt-1 text-sm text-muted">Audio + transcript → word timings</p>
+            </header>
+
+            <form id="uploadForm" class="space-y-6">
+                <div>
+                    <h2 id="audio-heading" class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Audio</h2>
+                    <div id="audioZone" data-dropzone class="drop-zone relative flex min-h-[5.5rem] items-center justify-center rounded-xl bg-surface-strong py-8">
+                        <input type="file" id="audioInput" accept="audio/*,video/*" class="file-drop-input" required aria-labelledby="audio-heading">
+                        <div class="pointer-events-none flex max-w-full items-center justify-center gap-2 px-10 text-center text-sm text-fg">
+                            <svg id="audioFileCheck" class="hidden h-5 w-5 shrink-0 text-[var(--accent-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M20 6L9 17l-5-5"/>
+                            </svg>
+                            <span id="audioFileName" class="min-w-0 truncate">Upload audio or video</span>
+                        </div>
+                        <button type="button" id="clearAudioBtn" class="audio-clear-btn absolute right-2 top-1/2 z-20 hidden -translate-y-1/2 rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-fg" aria-label="Remove media file" title="Remove file">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M18 6L6 18M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="mb-1.5 flex items-center justify-between gap-2">
+                        <h2 id="transcript-heading" class="text-xs font-medium uppercase tracking-wide text-muted">Transcript</h2>
+                        <button type="button" id="clearTranscriptBtn" class="text-xs font-medium text-muted underline decoration-transparent underline-offset-2 transition hover:text-fg hover:decoration-current">Clear</button>
+                    </div>
+                    <textarea id="transcriptPaste" rows="5" spellcheck="false"
+                        class="input-outline transcript-user-text mb-2 w-full resize-y rounded-xl bg-surface-strong px-3 py-2 text-sm text-fg placeholder:text-accent focus:outline-none focus:ring-1 focus:ring-[var(--text)]"
+                        placeholder="Paste transcript text here…" aria-labelledby="transcript-heading"></textarea>
+                    <div id="textZone" data-dropzone class="drop-zone relative rounded-xl bg-surface py-3">
+                        <input type="file" id="textInput" accept=".txt,text/plain" class="file-drop-input" aria-label="Upload transcript text file">
+                        <div class="pointer-events-none px-4 text-center text-xs text-muted">
+                            <span id="textFileName">Or drop / choose a .txt file</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 id="language-heading" class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Alignment language</h2>
+                    <select id="languageSelect" aria-labelledby="language-heading"
+                        class="input-outline w-full rounded-xl bg-surface-strong px-3 py-2.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-[var(--text)]">
+                        <option value="en">English</option>
+                        <option value="ja">Japanese</option>
+                        <option value="zh">Chinese</option>
+                    </select>
+                    <p id="languageHint" class="mt-1.5 text-xs text-muted">Match your transcript.</p>
+                </div>
+
+                <div id="editErrorBox" class="hidden rounded-xl border border-red-200 bg-red-50/90 px-3 py-2 text-xs text-red-800"></div>
+                <div id="editHintBox" class="input-outline hidden rounded-xl bg-surface px-3 py-2 text-xs text-muted" role="status"></div>
+
+                <button type="submit" id="submitBtn"
+                    class="btn-primary flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-medium shadow-sm transition disabled:opacity-40">
+                    <span>Align</span>
+                    <svg id="spinner" class="ml-2 hidden h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+            </form>
+        </div>
+
+        <div id="resultPanel" class="hidden">
+            <div class="mb-5 flex items-baseline justify-between gap-3">
+                <h1 class="text-xl tracking-tight text-fg">Alignment preview</h1>
+                <p id="timeDisplay" class="shrink-0 font-mono text-[11px] text-muted tabular-nums" aria-live="polite">0:00 / —</p>
+            </div>
+
+            <div class="space-y-5">
+                <div>
+                    <audio id="previewAudio" class="hidden" preload="metadata"></audio>
+                    <div class="mx-auto flex w-full max-w-md flex-col items-center gap-2">
+                        <div class="flex w-full items-center justify-center gap-3">
+                            <button type="button" id="playBtn" disabled
+                                class="play-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                                aria-label="Play or pause">
+                                <svg id="iconPlay" class="ml-0.5 h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                <svg id="iconPause" class="hidden h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                            </button>
+                            <div class="min-w-0 flex-1">
+                                <div class="timeline-shell relative flex w-full items-center">
+                                    <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full" style="background: var(--track)"></div>
+                                    <div id="timelineFill" class="pointer-events-none absolute left-0 top-1/2 h-1 max-w-full -translate-y-1/2 rounded-full bg-[var(--text)]" style="width: 0%"></div>
+                                    <input type="range" id="timeline" min="0" max="1000" value="0" disabled
+                                        class="timeline-range relative z-10 w-full disabled:cursor-not-allowed">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <article id="resultTranscript" class="align-article transcript-user-text" aria-label="Aligned transcript"></article>
+
+                <div class="divider-accent-soft border-t pt-5">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h2 class="text-xs font-medium uppercase tracking-wide text-muted">Download</h2>
+                        <div id="downloadBar" class="flex flex-wrap justify-end gap-1.5">
+                            <button type="button" class="btn-secondary btn-download" data-format="json">JSON</button>
+                            <button type="button" class="btn-secondary btn-download" data-format="srt">SRT</button>
+                            <button type="button" class="btn-secondary btn-download" data-format="csv">CSV</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="infoPanel" class="hidden">
+            <header class="page-head mb-8">
+                <div class="flex items-baseline justify-between gap-3">
+                    <h1 class="text-xl tracking-tight text-fg">Info</h1>
+                    <div id="themePresetRow" class="theme-presets shrink-0" role="group" aria-label="Color theme"></div>
+                </div>
+            </header>
+            <div class="space-y-4 text-sm leading-relaxed text-fg">
+                <p class="text-muted">This tool force-aligns your <strong class="font-medium text-fg">audio</strong> with a <strong class="font-medium text-fg">transcript</strong> and returns word-level timings using WhisperX on the server.</p>
+                <p class="text-muted">Paste text or upload a <code class="rounded bg-surface-strong px-1 py-0.5 text-xs text-fg">.txt</code> file and pick an alignment language that matches it.</p>
+                <p class="text-muted">After aligning, you can preview playback, click words to jump in the audio, and download <strong class="font-medium text-fg">JSON</strong>, <strong class="font-medium text-fg">SRT</strong>, or <strong class="font-medium text-fg">CSV</strong>.</p>
+                <p class="text-muted">The server needs <strong class="font-medium text-fg">ffmpeg</strong> on <code class="rounded bg-surface-strong px-1 text-xs text-fg">PATH</code> to decode audio. GPU is optional but speeds up alignment when available.</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = typeof window !== 'undefined' && window.STT_ALIGN_API_BASE != null
+            ? String(window.STT_ALIGN_API_BASE).replace(/\/$/, '')
+            : '';
+        function apiUrl(path) {
+            const p = path.startsWith('/') ? path : '/' + path;
+            return API_BASE + p;
+        }
+
+        let resultsData = null;
+        let audioObjectUrl = null;
+        let mediaDownloadBase = 'alignment';
+        let lastTranscriptPlain = '';
+        let alignmentWordMeta = [];
+        let lastScrollIdx = -1;
+
+        /** Line endings + Unicode line/paragraph separators → \n (matches server / indexOf). */
+        function normalizeTranscriptPlain(t) {
+            return String(t)
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .replace(/\u2028/g, '\n')
+                .replace(/\u2029/g, '\n');
+        }
+
+        /** Drop trailing locale codes like " (en)"; keep names such as "Norwegian (Bokmål)". */
+        function stripAlignLanguageLabelSuffix(label) {
+            const s = String(label).trim();
+            const m = s.match(/^(.+?)\s+\(([^)]+)\)\s*$/);
+            if (!m) return s;
+            const inner = m[2];
+            if (/^(?:[a-z]{2,3}|ja_romaji)$/.test(inner)) return m[1].trim();
+            return s;
+        }
+
+        function isCjkChar(ch) {
+            if (!ch) return false;
+            const cp = ch.codePointAt(0);
+            return (
+                (cp >= 0x3040 && cp <= 0x30ff) ||
+                (cp >= 0x3400 && cp <= 0x9fff) ||
+                (cp >= 0x3000 && cp <= 0x303f) ||
+                (cp >= 0xff00 && cp <= 0xffef)
+            );
+        }
+
+        function needsSpaceBetween(prevWord, nextWord) {
+            if (!prevWord || !nextWord) return false;
+            const a = prevWord[prevWord.length - 1];
+            const b = nextWord[0];
+            if (/\s/.test(a) || /\s/.test(b)) return false;
+            if (isCjkChar(a) && isCjkChar(b)) return false;
+            return true;
+        }
+
+        function wordsFromAlignJson(json) {
+            const segs = json && json.segments;
+            if (!Array.isArray(segs)) return [];
+            const out = [];
+            for (const seg of segs) {
+                const words = seg && seg.words;
+                if (!Array.isArray(words)) continue;
+                for (const w of words) {
+                    if (w == null) continue;
+                    const word = w.word;
+                    const start = w.start;
+                    const end = w.end;
+                    if (word == null || String(word) === '') continue;
+                    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                    out.push({ word: String(word), start, end });
+                }
+            }
+            return out;
+        }
+
+        function findActiveWordIndex(t) {
+            const n = alignmentWordMeta.length;
+            if (!n) return -1;
+            for (let i = 0; i < n; i++) {
+                const { start, end } = alignmentWordMeta[i];
+                if (t >= start && t < end) return i;
+            }
+            const last = alignmentWordMeta[n - 1];
+            if (t >= last.start && t <= last.end) return n - 1;
+            return -1;
+        }
+
+        function applyWordVisualState(t) {
+            const n = alignmentWordMeta.length;
+            if (!n) return;
+            const current = findActiveWordIndex(t);
+            const atTimelineStart = !Number.isFinite(t) || t <= 0;
+            const article = document.getElementById('resultTranscript');
+            if (!article) return;
+            const tokens = article.querySelectorAll('.align-token');
+            tokens.forEach((el) => {
+                const wi = Number(el.dataset.wordIndex);
+                if (!Number.isFinite(wi) || wi < 0 || wi >= n) return;
+                const { start, end } = alignmentWordMeta[wi];
+                el.classList.remove('align-token--current', 'align-token--past', 'align-token--upcoming');
+                if (current >= 0 && wi === current) {
+                    el.classList.add('align-token--current');
+                } else if (t >= end) {
+                    el.classList.add('align-token--past');
+                } else if (t < start) {
+                    el.classList.add(atTimelineStart ? 'align-token--past' : 'align-token--upcoming');
+                } else {
+                    el.classList.add('align-token--past');
+                }
+            });
+            if (current >= 0 && current !== lastScrollIdx) {
+                const first = article.querySelector('.align-token[data-word-index="' + current + '"]');
+                if (first) {
+                    lastScrollIdx = current;
+                    first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
+            }
+            if (current < 0) lastScrollIdx = -1;
+        }
+
+        function updateTimelineFill() {
+            const fill = document.getElementById('timelineFill');
+            const au = document.getElementById('previewAudio');
+            if (!fill || !au) return;
+            const d = au.duration;
+            const tt = au.currentTime;
+            if (!Number.isFinite(d) || d <= 0) {
+                fill.style.width = '0%';
+                return;
+            }
+            const pct = Math.min(100, Math.max(0, (tt / d) * 100));
+            fill.style.width = pct + '%';
+        }
+
+        /**
+         * mode gap: only whitespace → spaces; any line break → <br> (not a space).
+         * mode literal: preserve text; line breaks → <br>.
+         */
+        function appendTextWithBreaks(parent, text, mode) {
+            if (text == null || text === '') return;
+            const s = normalizeTranscriptPlain(text);
+            if (mode === 'gap') {
+                for (let i = 0; i < s.length; i++) {
+                    const c = s[i];
+                    if (c === '\n') {
+                        parent.appendChild(document.createElement('br'));
+                    } else if (/\s/.test(c)) {
+                        parent.appendChild(document.createTextNode(' '));
+                    }
+                }
+            } else {
+                let buf = '';
+                const flush = () => {
+                    if (buf.length) {
+                        parent.appendChild(document.createTextNode(buf));
+                        buf = '';
+                    }
+                };
+                for (let i = 0; i < s.length; i++) {
+                    const c = s[i];
+                    if (c === '\n') {
+                        flush();
+                        parent.appendChild(document.createElement('br'));
+                    } else {
+                        buf += c;
+                    }
+                }
+                flush();
+            }
+        }
+
+        function findSubstringCI(hay, needle, start) {
+            const n = needle.length;
+            if (n === 0) return { index: start, len: 0 };
+            const slice = hay.slice(start);
+            const nl = needle.toLowerCase();
+            for (let i = 0; i <= slice.length - n; i++) {
+                if (slice.slice(i, i + n).toLowerCase() === nl) {
+                    return { index: start + i, len: n };
+                }
+            }
+            return null;
+        }
+
+        /** Map aligned token to substring of lastTranscriptPlain (exact, or em-dash merge vs "left. Right"). */
+        function findNextWordSpanInPlain(w, prevEnd, plain) {
+            if (w == null || w === '') return null;
+            const exact = plain.indexOf(w, prevEnd);
+            if (exact >= 0) {
+                return { found: exact, end: exact + w.length, display: w };
+            }
+            const EM = '\u2014';
+            if (w.includes(EM)) {
+                const parts = w.split(EM);
+                if (parts.length === 2) {
+                    const left = parts[0].trimEnd();
+                    const right = parts[1].trimStart();
+                    if (left && right) {
+                        const fl = plain.indexOf(left, prevEnd);
+                        if (fl >= 0) {
+                            const afterLeft = fl + left.length;
+                            const m = findSubstringCI(plain, right, afterLeft);
+                            if (m) {
+                                const end = m.index + m.len;
+                                return { found: fl, end, display: plain.slice(fl, end) };
+                            }
+                        }
+                    }
+                }
+            }
+            const trimmed = String(w).trim();
+            if (trimmed.length > 0) {
+                let pos = plain.indexOf(trimmed, prevEnd);
+                while (pos >= 0) {
+                    const gap = plain.slice(prevEnd, pos);
+                    if (gap.length === 0 || /^\s+$/.test(gap)) {
+                        const end = pos + trimmed.length;
+                        return { found: pos, end, display: plain.slice(pos, end) };
+                    }
+                    pos = plain.indexOf(trimmed, pos + 1);
+                }
+            }
+            return null;
+        }
+
+        /**
+         * WhisperX only advances word boundaries on spaces, not newlines — one "word" can be "hello\\nworld".
+         * Split into one span per visual line so the highlight does not bridge the break.
+         */
+        function appendAlignTokenElement(article, row, wordIndex) {
+            const w = row.display != null ? row.display : row.word;
+            const lines = normalizeTranscriptPlain(String(w)).split('\n');
+            lines.forEach((line, li) => {
+                if (li > 0) {
+                    article.appendChild(document.createElement('br'));
+                }
+                const span = document.createElement('span');
+                span.className = 'align-token';
+                span.dataset.start = String(row.start);
+                span.dataset.end = String(row.end);
+                span.dataset.wordIndex = String(wordIndex);
+                span.setAttribute('tabindex', '0');
+                span.setAttribute('role', 'button');
+                span.setAttribute('title', 'Play from this word');
+                if (line.length) {
+                    appendTextWithBreaks(span, line, 'literal');
+                } else {
+                    span.appendChild(document.createTextNode('\u200b'));
+                }
+                article.appendChild(span);
+            });
+        }
+
+        function buildResultTranscriptFromAlignJson(json) {
+            const article = document.getElementById('resultTranscript');
+            lastScrollIdx = -1;
+            alignmentWordMeta = [];
+            article.innerHTML = '';
+
+            const rows = wordsFromAlignJson(json);
+            if (!rows.length) {
+                const p = document.createElement('p');
+                p.className = 'whitespace-pre-wrap';
+                p.textContent = lastTranscriptPlain;
+                article.appendChild(p);
+                return;
+            }
+
+            alignmentWordMeta = rows.map((r) => ({ start: r.start, end: r.end }));
+            const plain = lastTranscriptPlain;
+            let prevEnd = 0;
+            let usePlainGaps = true;
+            rows.forEach((row, idx) => {
+                const w = row.word;
+                let tokenRow = row;
+                if (usePlainGaps) {
+                    const span = findNextWordSpanInPlain(w, prevEnd, plain);
+                    if (span) {
+                        appendTextWithBreaks(article, plain.slice(prevEnd, span.found), 'gap');
+                        prevEnd = span.end;
+                        if (span.display !== w) {
+                            tokenRow = { ...row, display: span.display };
+                        }
+                    } else {
+                        usePlainGaps = false;
+                        if (idx > 0 && needsSpaceBetween(rows[idx - 1].word, row.word)) {
+                            article.appendChild(document.createTextNode(' '));
+                        }
+                    }
+                } else if (idx > 0 && needsSpaceBetween(rows[idx - 1].word, row.word)) {
+                    article.appendChild(document.createTextNode(' '));
+                }
+                appendAlignTokenElement(article, tokenRow, idx);
+            });
+            if (usePlainGaps && prevEnd < plain.length) {
+                appendTextWithBreaks(article, plain.slice(prevEnd), 'gap');
+            }
+            const au = document.getElementById('previewAudio');
+            applyWordVisualState(au && Number.isFinite(au.currentTime) ? au.currentTime : 0);
+            updateTimelineFill();
+        }
+
+        function stemFromMediaFilename(name) {
+            if (!name || typeof name !== 'string') return 'alignment';
+            let base = name.replace(/^.*[/\\]/, '');
+            const dot = base.lastIndexOf('.');
+            if (dot > 0) base = base.slice(0, dot);
+            base = base.replace(/[\x00-\x1f<>:"|?*]/g, '').trim();
+            return base.slice(0, 180) || 'alignment';
+        }
+
+        function setAudioZoneFilled(filled) {
+            const check = document.getElementById('audioFileCheck');
+            const clearBtn = document.getElementById('clearAudioBtn');
+            if (check) check.classList.toggle('hidden', !filled);
+            if (clearBtn) clearBtn.classList.toggle('hidden', !filled);
+        }
+
+        function formatTime(sec) {
+            if (!Number.isFinite(sec) || sec < 0) return '0:00';
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return m + ':' + (s < 10 ? '0' : '') + s;
+        }
+
+        function updateTimeDisplay() {
+            const el = document.getElementById('timeDisplay');
+            if (!el) return;
+            const au = document.getElementById('previewAudio');
+            const t = au ? au.currentTime : 0;
+            const d = au ? au.duration : NaN;
+            el.textContent = formatTime(t) + ' / ' + (Number.isFinite(d) ? formatTime(d) : '—');
+        }
+
+        function seekToWordAndPlay(start) {
+            if (!Number.isFinite(start)) return;
+            const au = document.getElementById('previewAudio');
+            const tl = document.getElementById('timeline');
+            const ip = document.getElementById('iconPlay');
+            const ipa = document.getElementById('iconPause');
+            if (!au) return;
+            const d = au.duration;
+            au.currentTime = start;
+            if (tl && Number.isFinite(d) && d > 0) {
+                tl.value = String(Math.round((start / d) * 1000));
+            }
+            applyWordVisualState(start);
+            updateTimelineFill();
+            updateTimeDisplay();
+            au.play().then(() => {
+                if (ip) ip.classList.add('hidden');
+                if (ipa) ipa.classList.remove('hidden');
+            }).catch(() => {});
+        }
+
+        function bindDropzoneHighlight(zone) {
+            const markOver = (e) => {
+                e.preventDefault();
+                zone.classList.add('dropzone--over');
+            };
+            const maybeLeave = (e) => {
+                const r = e.relatedTarget;
+                if (!r || !zone.contains(r)) zone.classList.remove('dropzone--over');
+            };
+            zone.addEventListener('dragenter', markOver, true);
+            zone.addEventListener('dragover', markOver, true);
+            zone.addEventListener('dragleave', maybeLeave, true);
+            zone.addEventListener('drop', () => {
+                zone.classList.remove('dropzone--over');
+            }, true);
+        }
+        document.querySelectorAll('[data-dropzone]').forEach(bindDropzoneHighlight);
+
+        const editPanel = document.getElementById('editPanel');
+        const resultPanel = document.getElementById('resultPanel');
+        const infoPanel = document.getElementById('infoPanel');
+        const editErrorBox = document.getElementById('editErrorBox');
+        const editHintBox = document.getElementById('editHintBox');
+        const previewAudio = document.getElementById('previewAudio');
+        const playBtn = document.getElementById('playBtn');
+        const timeline = document.getElementById('timeline');
+        const iconPlay = document.getElementById('iconPlay');
+        const iconPause = document.getElementById('iconPause');
+
+        const navPrimaryBtn = document.getElementById('navPrimaryBtn');
+        const navPrimaryLabel = document.getElementById('navPrimaryLabel');
+        const navRightActions = document.getElementById('navRightActions');
+        const loadDemoBtn = document.getElementById('loadDemoBtn');
+        const panels = { edit: editPanel, result: resultPanel, info: infoPanel };
+        let currentView = 'edit';
+        let viewBeforeInfo = 'edit';
+
+        function setView(view) {
+            if (view === 'info' && currentView !== 'info') {
+                viewBeforeInfo = currentView;
+            }
+            currentView = view;
+            for (const [k, el] of Object.entries(panels)) {
+                el.classList.toggle('hidden', k !== view);
+            }
+            navPrimaryBtn.classList.toggle('hidden', view === 'edit');
+            if (view !== 'edit') {
+                navPrimaryLabel.textContent = view === 'result' ? 'Create new alignment' : 'Back';
+            }
+            const onInfo = view === 'info';
+            navRightActions.classList.toggle('invisible', onInfo);
+            navRightActions.classList.toggle('pointer-events-none', onInfo);
+            navRightActions.toggleAttribute('inert', onInfo);
+            navRightActions.setAttribute('aria-hidden', onInfo ? 'true' : 'false');
+            if (view === 'edit') {
+                previewAudio.pause();
+                iconPlay.classList.remove('hidden');
+                iconPause.classList.add('hidden');
+                lastScrollIdx = -1;
+                alignmentWordMeta = [];
+                editHintBox.classList.add('hidden');
+            }
+        }
+
+        setView('edit');
+
+        const THEME_KEY = 'stt-align-ui-theme';
+        const THEMES = [
+            { id: 'coffee', label: 'Coffee', a: '#c4a484', b: '#410200' },
+            { id: 'ocean', label: 'Ocean', a: '#3d8ab8', b: '#0c2744' },
+            { id: 'slate', label: 'Slate', a: '#64748b', b: '#1e293b' },
+        ];
+        const VALID_THEMES = new Set(THEMES.map((t) => t.id));
+
+        const themePresetRow = document.getElementById('themePresetRow');
+        THEMES.forEach((t) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'theme-swatch';
+            btn.dataset.setTheme = t.id;
+            btn.style.setProperty('--swatch-a', t.a);
+            btn.style.setProperty('--swatch-b', t.b);
+            btn.title = t.label;
+            btn.setAttribute('aria-label', t.label + ' theme');
+            themePresetRow.appendChild(btn);
+        });
+
+        function getStoredTheme() {
+            const t = document.documentElement.getAttribute('data-theme');
+            return VALID_THEMES.has(t) ? t : 'coffee';
+        }
+
+        function applyTheme(name) {
+            const theme = VALID_THEMES.has(name) ? name : 'coffee';
+            document.documentElement.setAttribute('data-theme', theme);
+            try {
+                localStorage.setItem(THEME_KEY, theme);
+            } catch (e) {}
+            themePresetRow.querySelectorAll('.theme-swatch').forEach((btn) => {
+                btn.setAttribute('aria-pressed', btn.dataset.setTheme === theme ? 'true' : 'false');
+            });
+        }
+
+        themePresetRow.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-set-theme]');
+            if (btn) applyTheme(btn.dataset.setTheme);
+        });
+        applyTheme(getStoredTheme());
+
+        navPrimaryBtn.addEventListener('click', () => {
+            if (currentView === 'info') setView(viewBeforeInfo);
+            else setView('edit');
+        });
+        document.getElementById('infoBtn').addEventListener('click', () => setView('info'));
+        document.getElementById('clearTranscriptBtn').addEventListener('click', () => {
+            document.getElementById('transcriptPaste').value = '';
+            document.getElementById('textInput').value = '';
+            document.getElementById('textFileName').textContent = 'Or drop / choose a .txt file';
+        });
+
+        const audioInputEl = document.getElementById('audioInput');
+        const audioFileNameEl = document.getElementById('audioFileName');
+        const clearAudioBtn = document.getElementById('clearAudioBtn');
+
+        function clearAudioSelection() {
+            audioInputEl.value = '';
+            mediaDownloadBase = 'alignment';
+            audioFileNameEl.textContent = 'Upload audio or video';
+            setAudioZoneFilled(false);
+            setAudioFromFile(null);
+        }
+
+        clearAudioBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            clearAudioSelection();
+        });
+
+        function parseDemoCsvRows(csvText) {
+            const lines = csvText.split(/\r?\n/).filter(Boolean);
+            const words = [];
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.startsWith('"')) continue;
+                const j = line.indexOf('",');
+                if (j < 1) continue;
+                const word = line.slice(1, j).replace(/""/g, '"');
+                const rest = line.slice(j + 2).split(',');
+                const start = parseFloat(rest[0]);
+                const end = parseFloat(rest[1]);
+                const scoreRaw = rest[2];
+                const score = scoreRaw !== undefined && scoreRaw !== '' ? parseFloat(scoreRaw) : NaN;
+                if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                const row = { word, start, end };
+                if (Number.isFinite(score)) row.score = score;
+                words.push(row);
+            }
+            return words;
+        }
+
+        /** True if every CSV token appears in order in plain (same order as alignment preview). */
+        function csvMatchesTranscript(plain, rows) {
+            if (!plain || !rows.length) return false;
+            let prevEnd = 0;
+            for (let i = 0; i < rows.length; i++) {
+                const span = findNextWordSpanInPlain(rows[i].word, prevEnd, plain);
+                if (!span) return false;
+                prevEnd = span.end;
+            }
+            return true;
+        }
+
+        /** When demo.csv is out of sync with demo.txt, derive tokens from plain so gaps/newlines match preview. */
+        function wordsFromPlainForDemo(plain) {
+            const words = [];
+            const re = /\S+/g;
+            let m;
+            let t = 0;
+            const dur = 0.35;
+            while ((m = re.exec(plain)) !== null) {
+                words.push({ word: m[0], start: t, end: t + dur });
+                t += dur;
+            }
+            return words;
+        }
+
+        function generateCsvFromWords(words) {
+            const lines = ['word,start,end,score'];
+            for (const w of words) {
+                const text = String(w.word).replace(/"/g, '""');
+                const score = w.score !== undefined && Number.isFinite(w.score) ? String(w.score) : '';
+                lines.push(`"${text}",${w.start},${w.end},${score}`);
+            }
+            return lines.join('\n') + '\n';
+        }
+
+        function demoWordsToAlignJson(words) {
+            return {
+                segments: [
+                    {
+                        words: words.map((w) => {
+                            const o = { word: w.word, start: w.start, end: w.end };
+                            if (w.score !== undefined) o.score = w.score;
+                            return o;
+                        }),
+                    },
+                ],
+            };
+        }
+
+        function generateSrtFromDemoWords(words) {
+            function formatTime(seconds) {
+                if (seconds == null || !Number.isFinite(seconds)) return '00:00:00,000';
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = Math.floor(seconds % 60);
+                const msecs = Math.floor((seconds - Math.floor(seconds)) * 1000);
+                const pad = (n, w) => String(n).padStart(w, '0');
+                return pad(hours, 2) + ':' + pad(minutes, 2) + ':' + pad(secs, 2) + ',' + pad(msecs, 3);
+            }
+            const lines = [];
+            let idx = 1;
+            for (const w of words) {
+                const t = w.word;
+                if (t == null || t === '') continue;
+                lines.push(
+                    idx++ +
+                        '\n' +
+                        formatTime(w.start) +
+                        ' --> ' +
+                        formatTime(w.end) +
+                        '\n' +
+                        t +
+                        '\n'
+                );
+            }
+            return lines.join('\n');
+        }
+
+        async function loadDemo() {
+            editHintBox.classList.add('hidden');
+            editErrorBox.classList.add('hidden');
+
+            let transcript = '';
+            let csvText = '';
+            try {
+                let r = await fetch(apiUrl('/demo/demo.txt'));
+                if (r.ok) {
+                    transcript = normalizeTranscriptPlain(await r.text()).trim();
+                }
+                r = await fetch(apiUrl('/demo/demo.csv'));
+                if (!r.ok) throw new Error('missing');
+                csvText = (await r.text()).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            } catch (_) {
+                setView('edit');
+                editErrorBox.textContent = 'Could not load demo files from the demo folder.';
+                editErrorBox.classList.remove('hidden');
+                return;
+            }
+
+            let words = parseDemoCsvRows(csvText);
+            if (!words.length) {
+                setView('edit');
+                editErrorBox.textContent = 'Demo CSV had no word rows.';
+                editErrorBox.classList.remove('hidden');
+                return;
+            }
+            if (!transcript) {
+                transcript = words.map((w) => w.word).join(' ');
+            }
+
+            let demoCsvOut = csvText.trim() + (csvText.endsWith('\n') ? '' : '\n');
+            if (transcript && !csvMatchesTranscript(transcript, words)) {
+                words = wordsFromPlainForDemo(transcript);
+                demoCsvOut = generateCsvFromWords(words);
+            }
+
+            resultsData = {
+                language: 'en',
+                json: demoWordsToAlignJson(words),
+                srt: generateSrtFromDemoWords(words),
+                csv: demoCsvOut,
+            };
+            lastTranscriptPlain = transcript != null ? normalizeTranscriptPlain(transcript) : '';
+            mediaDownloadBase = 'demo';
+            buildResultTranscriptFromAlignJson(resultsData.json);
+
+            const audioNames = ['demo.mp3', 'audio.mp3', 'audio.webm', 'audio.wav', 'audio.m4a'];
+            let blob = null;
+            let ext = '.mp3';
+            for (const name of audioNames) {
+                const r = await fetch(apiUrl('/demo/' + name));
+                if (r.ok) {
+                    blob = await r.blob();
+                    const d = name.lastIndexOf('.');
+                    ext = d >= 0 ? name.slice(d) : '.mp3';
+                    break;
+                }
+            }
+
+            if (blob) {
+                const type = blob.type || (ext === '.mp3' ? 'audio/mpeg' : 'application/octet-stream');
+                const file = new File([blob], 'demo' + ext, { type });
+                setAudioFromFile(file);
+            } else {
+                setAudioFromFile(null);
+            }
+            setView('result');
+        }
+
+        loadDemoBtn.addEventListener('click', () => {
+            loadDemo();
+        });
+
+        const resultTranscriptEl = document.getElementById('resultTranscript');
+        resultTranscriptEl.addEventListener('click', (e) => {
+            const tok = e.target.closest('.align-token');
+            if (!tok) return;
+            const start = parseFloat(tok.dataset.start);
+            seekToWordAndPlay(start);
+        });
+        resultTranscriptEl.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (!e.target.classList || !e.target.classList.contains('align-token')) return;
+            e.preventDefault();
+            seekToWordAndPlay(parseFloat(e.target.dataset.start));
+        });
+
+        function setAudioFromFile(file) {
+            if (audioObjectUrl) {
+                URL.revokeObjectURL(audioObjectUrl);
+                audioObjectUrl = null;
+            }
+            if (!file) {
+                previewAudio.removeAttribute('src');
+                previewAudio.load();
+                playBtn.disabled = true;
+                timeline.disabled = true;
+                timeline.value = 0;
+                updateTimeDisplay();
+                const f = document.getElementById('timelineFill');
+                if (f) f.style.width = '0%';
+                iconPlay.classList.remove('hidden');
+                iconPause.classList.add('hidden');
+                return;
+            }
+            audioObjectUrl = URL.createObjectURL(file);
+            previewAudio.src = audioObjectUrl;
+            previewAudio.load();
+            playBtn.disabled = false;
+            timeline.disabled = false;
+        }
+
+        previewAudio.addEventListener('loadedmetadata', () => {
+            const d = previewAudio.duration;
+            timeline.value = 0;
+            applyWordVisualState(0);
+            updateTimelineFill();
+            updateTimeDisplay();
+        });
+
+        previewAudio.addEventListener('timeupdate', () => {
+            const t = previewAudio.currentTime;
+            const d = previewAudio.duration;
+            if (Number.isFinite(d) && d > 0) {
+                timeline.value = String(Math.round((t / d) * 1000));
+            }
+            applyWordVisualState(t);
+            updateTimelineFill();
+            updateTimeDisplay();
+        });
+
+        previewAudio.addEventListener('ended', () => {
+            iconPlay.classList.remove('hidden');
+            iconPause.classList.add('hidden');
+            const d = previewAudio.duration;
+            const t = Number.isFinite(d) ? d : previewAudio.currentTime;
+            applyWordVisualState(t);
+            updateTimelineFill();
+            updateTimeDisplay();
+        });
+
+        playBtn.addEventListener('click', () => {
+            if (previewAudio.paused) {
+                previewAudio.play().catch(() => {});
+                iconPlay.classList.add('hidden');
+                iconPause.classList.remove('hidden');
+            } else {
+                previewAudio.pause();
+                iconPlay.classList.remove('hidden');
+                iconPause.classList.add('hidden');
+            }
+            updateTimeDisplay();
+        });
+
+        timeline.addEventListener('input', () => {
+            const d = previewAudio.duration;
+            if (!Number.isFinite(d) || d <= 0) return;
+            const t = (Number(timeline.value) / 1000) * d;
+            previewAudio.currentTime = t;
+            applyWordVisualState(t);
+            updateTimelineFill();
+            updateTimeDisplay();
+        });
+
+        async function loadAlignLanguages() {
+            const sel = document.getElementById('languageSelect');
+            try {
+                const r = await fetch(apiUrl('/api/align-languages'));
+                if (!r.ok) throw new Error('bad response');
+                const data = await r.json();
+                if (!data.languages || !data.languages.length) throw new Error('empty');
+                const current = sel.value;
+                sel.innerHTML = '';
+                data.languages.forEach(({ code, label }) => {
+                    const o = document.createElement('option');
+                    o.value = code;
+                    o.textContent = stripAlignLanguageLabelSuffix(label);
+                    sel.appendChild(o);
+                });
+                if ([...sel.options].some((o) => o.value === current)) {
+                    sel.value = current;
+                } else {
+                    sel.value = 'en';
+                }
+            } catch (_) {}
+        }
+        loadAlignLanguages();
+
+        audioInputEl.addEventListener('change', function () {
+            if (this.files[0]) {
+                audioFileNameEl.textContent = this.files[0].name;
+                mediaDownloadBase = stemFromMediaFilename(this.files[0].name);
+                setAudioZoneFilled(true);
+                setAudioFromFile(this.files[0]);
+            } else {
+                clearAudioSelection();
+            }
+        });
+
+        document.getElementById('textInput').addEventListener('change', function () {
+            const el = document.getElementById('textFileName');
+            if (this.files[0]) {
+                el.textContent = this.files[0].name;
+                document.getElementById('transcriptPaste').value = '';
+            } else {
+                el.textContent = 'Or choose a .txt file';
+            }
+        });
+
+        document.getElementById('transcriptPaste').addEventListener('input', function () {
+            if (this.value.trim()) {
+                document.getElementById('textInput').value = '';
+                document.getElementById('textFileName').textContent = 'Or drop / choose a .txt file';
+            }
+        });
+
+        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const audioFile = document.getElementById('audioInput').files[0];
+            const textFile = document.getElementById('textInput').files[0];
+            let transcriptText = '';
+            if (textFile) {
+                transcriptText = normalizeTranscriptPlain(await textFile.text());
+            } else {
+                transcriptText = normalizeTranscriptPlain(document.getElementById('transcriptPaste').value);
+            }
+
+            if (!audioFile) {
+                alert('Please add an audio or video file.');
+                return;
+            }
+            if (!transcriptText.trim()) {
+                alert('Paste transcript text or choose a .txt file.');
+                return;
+            }
+
+            const audioBuf = await audioFile.arrayBuffer();
+            const ext = (() => {
+                const n = audioFile.name || '';
+                const i = n.lastIndexOf('.');
+                return i >= 0 ? n.slice(i).toLowerCase() : '.wav';
+            })();
+            const safeAudio = new File([audioBuf], `audio${ext}`, { type: audioFile.type || 'application/octet-stream' });
+            const safeTranscript = new File([transcriptText], 'transcript.txt', { type: 'text/plain;charset=utf-8' });
+
+            const formData = new FormData();
+            formData.append('audio', safeAudio);
+            formData.append('transcript', safeTranscript);
+            formData.append('language', document.getElementById('languageSelect').value);
+
+            const submitBtn = document.getElementById('submitBtn');
+            const spinner = document.getElementById('spinner');
+
+            submitBtn.disabled = true;
+            spinner.classList.remove('hidden');
+            editErrorBox.classList.add('hidden');
+            editHintBox.classList.add('hidden');
+            resultsData = null;
+
+            try {
+                const response = await fetch(apiUrl('/align'), {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorMsg = await response.text();
+                    throw new Error(errorMsg || 'Failed to align');
+                }
+
+                resultsData = await response.json();
+                lastTranscriptPlain = transcriptText;
+                mediaDownloadBase = stemFromMediaFilename(audioFile.name);
+                buildResultTranscriptFromAlignJson(resultsData.json);
+                setView('result');
+
+            } catch (error) {
+                editErrorBox.textContent = 'Error: ' + error.message;
+                editErrorBox.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        });
+
+        const DOWNLOAD_SPECS = {
+            json: { mime: 'application/json', getBody: (d) => JSON.stringify(d.json, null, 2) },
+            srt: { mime: 'text/plain', getBody: (d) => d.srt },
+            csv: { mime: 'text/csv', getBody: (d) => d.csv },
+        };
+
+        function downloadFormat(format) {
+            const spec = DOWNLOAD_SPECS[format];
+            if (!resultsData || !spec || resultsData[format] == null) return;
+            const blob = new Blob([spec.getBody(resultsData)], { type: spec.mime });
+            const url = URL.createObjectURL(blob);
+            const a = Object.assign(document.createElement('a'), {
+                href: url,
+                download: mediaDownloadBase + '.' + format,
+            });
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        document.getElementById('downloadBar').addEventListener('click', (e) => {
+            const fmt = e.target.closest('[data-format]')?.dataset.format;
+            if (fmt) downloadFormat(fmt);
+        });
+    </script>
+</body>
+</html>

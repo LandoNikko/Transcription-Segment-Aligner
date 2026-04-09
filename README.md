@@ -1,4 +1,4 @@
-# Word Aligner
+# Transcription Segment Aligner
 
 Align **transcript** to **audio or video** to get **word-level timings**.
 
@@ -8,8 +8,8 @@ Export as **JSON**, **SRT** or **CSV**.
 
 ## Setup
 
-1. [Python 3.10+](https://www.python.org/) and [ffmpeg](https://ffmpeg.org) (must be on your `PATH` — the server uses it to decode media).
-2. Create a virtual environment, install dependencies, and start the app:
+1. [Python 3.10+](https://www.python.org/) and [ffmpeg](https://ffmpeg.org) (on `PATH`).
+2. Create a virtual environment, install dependencies and start the app:
 
 ```bash
 python -m venv venv
@@ -18,11 +18,20 @@ pip install -r requirements.txt
 python app.py
 ```
 
-3. Open **http://127.0.0.1:8000** in your browser (that is where the app listens).
+3. Open **http://127.0.0.1:8000**.
 
 **macOS/Linux:** use `source venv/bin/activate` instead of `venv\Scripts\activate`.
 
-**Windows:** after the venv exists, you can run `start.bat` instead - starts the server and opens the browser when the app is ready.
+**Windows:** after venv exists, running `start.bat` starts everything.
+
+**Stack:** [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/) for local app, [WhisperX](https://github.com/m-bain/whisperX) and [PyTorch](https://pytorch.org/) for alignment (CUDA used automatically when available), [librosa](https://librosa.org/) for timing, [ffmpeg](https://ffmpeg.org/) on `PATH` for media decode.
+
+## To-do
+
+- Add music/karaoke and .lrc export
+- Allow manual segmentation fine-tuning
+- Better language support
+- Cross-file management
 
 ## License
 

@@ -74,15 +74,27 @@
                     </div>
                 </div>
 
-                <div>
-                    <h2 id="language-heading" class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Alignment language</h2>
-                    <select id="languageSelect" aria-labelledby="language-heading"
-                        class="input-outline w-full rounded-xl bg-surface-strong px-3 py-2.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-[var(--text)]">
-                        <option value="en">English</option>
-                        <option value="ja">Japanese</option>
-                        <option value="zh">Chinese</option>
-                    </select>
-                    <p id="languageHint" class="mt-1.5 text-xs text-muted">Match your transcript.</p>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <h2 id="language-heading" class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Alignment language</h2>
+                        <select id="languageSelect" aria-labelledby="language-heading"
+                            class="input-outline w-full rounded-xl bg-surface-strong px-3 py-2.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-[var(--text)]">
+                            <option value="en">English</option>
+                            <option value="ja">Japanese</option>
+                            <option value="zh">Chinese</option>
+                        </select>
+                        <p id="languageHint" class="mt-1.5 text-xs text-muted">Match your transcript.</p>
+                    </div>
+
+                    <div>
+                        <h2 id="mode-heading" class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Audio type</h2>
+                        <select id="modeSelect" aria-labelledby="mode-heading"
+                            class="input-outline w-full rounded-xl bg-surface-strong px-3 py-2.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-[var(--text)]">
+                            <option value="spoken">Spoken word</option>
+                            <option value="music">Music (isolate vocals)</option>
+                        </select>
+                        <p id="modeHint" class="mt-1.5 text-xs text-muted">Select audio content.</p>
+                    </div>
                 </div>
 
                 <div id="editErrorBox" class="hidden rounded-xl border border-red-200 bg-red-50/90 px-3 py-2 text-xs text-red-800"></div>
@@ -137,6 +149,7 @@
                             <button type="button" class="btn-secondary btn-download" data-format="json">JSON</button>
                             <button type="button" class="btn-secondary btn-download" data-format="srt">SRT</button>
                             <button type="button" class="btn-secondary btn-download" data-format="csv">CSV</button>
+                            <button type="button" class="btn-secondary btn-download" data-format="lrc">LRC</button>
                         </div>
                     </div>
                 </div>
@@ -343,12 +356,22 @@
             return null;
         }
 
-        /** Map aligned token to substring of lastTranscriptPlain (exact, or em-dash merge vs "left. Right"). */
+        function skipLeadingWs(s, from) {
+            let i = from;
+            while (i < s.length && /\s/.test(s[i])) i++;
+            return i;
+        }
+
+        /**
+         * Next aligned token in plain text: only at the next non-whitespace position after prevEnd.
+         * Avoids indexOf/substring heuristics that matched the wrong "the" or substrings inside words.
+         * Em dash: aligned "left—right" vs plain "left. Right" (rare).
+         */
         function findNextWordSpanInPlain(w, prevEnd, plain) {
             if (w == null || w === '') return null;
-            const exact = plain.indexOf(w, prevEnd);
-            if (exact >= 0) {
-                return { found: exact, end: exact + w.length, display: w };
+            const i = skipLeadingWs(plain, prevEnd);
+            if (plain.slice(i, i + w.length) === w) {
+                return { found: i, end: i + w.length, display: w };
             }
             const EM = '\u2014';
             if (w.includes(EM)) {
@@ -367,18 +390,6 @@
                             }
                         }
                     }
-                }
-            }
-            const trimmed = String(w).trim();
-            if (trimmed.length > 0) {
-                let pos = plain.indexOf(trimmed, prevEnd);
-                while (pos >= 0) {
-                    const gap = plain.slice(prevEnd, pos);
-                    if (gap.length === 0 || /^\s+$/.test(gap)) {
-                        const end = pos + trimmed.length;
-                        return { found: pos, end, display: plain.slice(pos, end) };
-                    }
-                    pos = plain.indexOf(trimmed, pos + 1);
                 }
             }
             return null;
@@ -753,6 +764,24 @@
             return lines.join('\n');
         }
 
+        function generateLrcFromDemoWords(words) {
+            function formatTime(seconds) {
+                if (seconds == null || !Number.isFinite(seconds)) return '00:00.00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                const csecs = Math.floor((seconds - Math.floor(seconds)) * 100);
+                const pad = (n, w) => String(n).padStart(w, '0');
+                return pad(mins, 2) + ':' + pad(secs, 2) + '.' + pad(csecs, 2);
+            }
+            const lines = [];
+            for (const w of words) {
+                const t = w.word;
+                if (t == null || t === '') continue;
+                lines.push('[' + formatTime(w.start) + ']' + t);
+            }
+            return lines.join('\n');
+        }
+
         async function loadDemo() {
             editHintBox.classList.add('hidden');
             editErrorBox.classList.add('hidden');
@@ -796,6 +825,7 @@
                 json: demoWordsToAlignJson(words),
                 srt: generateSrtFromDemoWords(words),
                 csv: demoCsvOut,
+                lrc: generateLrcFromDemoWords(words),
             };
             lastTranscriptPlain = transcript != null ? normalizeTranscriptPlain(transcript) : '';
             mediaDownloadBase = 'demo';
@@ -1005,6 +1035,7 @@
             formData.append('audio', safeAudio);
             formData.append('transcript', safeTranscript);
             formData.append('language', document.getElementById('languageSelect').value);
+            formData.append('mode', document.getElementById('modeSelect').value);
 
             const submitBtn = document.getElementById('submitBtn');
             const spinner = document.getElementById('spinner');
@@ -1045,6 +1076,7 @@
             json: { mime: 'application/json', getBody: (d) => JSON.stringify(d.json, null, 2) },
             srt: { mime: 'text/plain', getBody: (d) => d.srt },
             csv: { mime: 'text/csv', getBody: (d) => d.csv },
+            lrc: { mime: 'text/plain', getBody: (d) => d.lrc },
         };
 
         function downloadFormat(format) {

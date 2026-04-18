@@ -28,8 +28,7 @@ python app.py
 
 ## To-do
 
-- Add music/karaoke and .lrc export
-- Allow manual segmentation fine-tuning
+- Add manual segmentation fine-tuning
 - Better language support
 - Cross-file management
 

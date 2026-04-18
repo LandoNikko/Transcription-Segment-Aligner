@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import shutil
@@ -11,10 +12,10 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import librosa
 import numpy as np
 import torch
 import whisperx
+from whisperx.audio import SAMPLE_RATE
 from whisperx.alignment import DEFAULT_ALIGN_MODELS_HF, DEFAULT_ALIGN_MODELS_TORCH
 
 app = FastAPI()
@@ -145,16 +146,41 @@ def ensure_ffmpeg() -> None:
         )
 
 
-def align_transcript(audio_path: str, transcript_text: str, language_code: str):
+def align_transcript(audio_path: str, transcript_text: str, language_code: str, mode: str = "spoken"):
     ensure_ffmpeg()
     lc = (language_code or "en").lower().strip()
     model_lc = resolve_align_model_code(lc)
-    print(f"Loading audio {audio_path} (language={lc!r}, align_model={model_lc!r})")
+    print(f"Loading audio {audio_path} (language={lc!r}, align_model={model_lc!r}, mode={mode!r})")
     if not os.path.isfile(audio_path):
         raise FileNotFoundError(f"Audio file missing at {audio_path!r}")
-    audio = whisperx.load_audio(audio_path)
 
-    duration = librosa.get_duration(y=audio, sr=16000)
+    if mode == "music":
+        print(f"Running Demucs to isolate vocals for {audio_path}...")
+        out_dir = tempfile.mkdtemp(prefix="demucs_out_")
+        try:
+            import sys
+            subprocess.run([
+                sys.executable, "-m", "demucs", "-n", "htdemucs", "--two-stems", "vocals",
+                audio_path, "-o", out_dir
+            ], check=True, capture_output=True)
+            
+            base_name = os.path.splitext(os.path.basename(audio_path))[0]
+            vocals_path = os.path.join(out_dir, "htdemucs", base_name, "vocals.wav")
+            
+            if not os.path.exists(vocals_path):
+                raise FileNotFoundError(f"Demucs did not output vocals at {vocals_path}")
+            
+            print("Loading extracted vocals...")
+            audio = whisperx.load_audio(vocals_path)
+        except subprocess.CalledProcessError as e:
+            print("Demucs error:", e.stderr.decode("utf-8", errors="replace"))
+            raise RuntimeError(f"Demucs failed to process the audio: {e}")
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)
+    else:
+        audio = whisperx.load_audio(audio_path)
+
+    duration = float(len(audio)) / float(SAMPLE_RATE)
 
     transcript_segments = [
         {"text": transcript_text, "start": 0.0, "end": duration}
@@ -171,6 +197,7 @@ def align_transcript(audio_path: str, transcript_text: str, language_code: str):
         DEVICE,
         return_char_alignments=False,
     )
+    fill_missing_word_timings(result.get("segments") or [], duration)
 
     return result
 
@@ -183,6 +210,64 @@ def _make_serializable(d):
     if isinstance(d, (np.float32, np.float64, np.float16)):
         return float(d)
     return d
+
+
+def _word_timing_finite(w: Dict) -> bool:
+    s, e = w.get("start"), w.get("end")
+    if s is None or e is None:
+        return False
+    try:
+        fs, fe = float(s), float(e)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(fs) and math.isfinite(fe)
+
+
+def fill_missing_word_timings(segments: List[Dict], fallback_duration: float) -> None:
+    """WhisperX skips trellis timing for chars outside the wav2vec vocab (e.g. digits).
+    Allocate the gap between neighboring timed words using length weights (not equal
+    slabs). Interpolated words get no score — avoids fake zeros in exports."""
+    fd = max(0.0, float(fallback_duration))
+    for seg in segments:
+        words = seg.get("words")
+        if not words:
+            continue
+        try:
+            t_lo_f = float(seg["start"]) if seg.get("start") is not None else 0.0
+            t_hi_f = float(seg["end"]) if seg.get("end") is not None else fd
+        except (TypeError, ValueError):
+            t_lo_f, t_hi_f = 0.0, fd
+        if not math.isfinite(t_lo_f):
+            t_lo_f = 0.0
+        if not math.isfinite(t_hi_f):
+            t_hi_f = fd
+        if t_hi_f < t_lo_f:
+            t_hi_f = t_lo_f
+
+        n = len(words)
+        i = 0
+        while i < n:
+            if _word_timing_finite(words[i]):
+                i += 1
+                continue
+            j = i
+            while j < n and not _word_timing_finite(words[j]):
+                j += 1
+            prev_end = float(words[i - 1]["end"]) if i > 0 and _word_timing_finite(words[i - 1]) else t_lo_f
+            next_start = float(words[j]["start"]) if j < n and _word_timing_finite(words[j]) else t_hi_f
+            gap = max(0.0, next_start - prev_end)
+            weights = [max(1, len(str(words[k].get("word") or ""))) for k in range(i, j)]
+            total_w = sum(weights) or 1.0
+            t = prev_end
+            for k in range(i, j):
+                frac = weights[k - i] / total_w
+                seg_len = gap * frac
+                s, e = t, t + seg_len
+                words[k]["start"] = round(s, 3)
+                words[k]["end"] = round(e, 3)
+                words[k].pop("score", None)
+                t = e
+            i = j
 
 
 def generate_srt(segments: List[Dict]) -> str:
@@ -219,6 +304,25 @@ def generate_csv(segments: List[Dict]) -> str:
     return "\n".join(csv_content)
 
 
+def generate_lrc(segments: List[Dict]) -> str:
+    def format_time(seconds: float) -> str:
+        if seconds is None:
+            return "00:00.00"
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        csecs = int(round((seconds - int(seconds)) * 100))
+        return f"{mins:02d}:{secs:02d}.{csecs:02d}"
+
+    lrc_content = []
+    for seg in segments:
+        for word in seg.get('words', []):
+            start = word.get('start')
+            text = word.get('word')
+            if start is not None and text:
+                lrc_content.append(f"[{format_time(start)}]{text}")
+    return "\n".join(lrc_content)
+
+
 @app.get("/api/align-languages")
 def list_align_languages():
     languages = []
@@ -233,6 +337,7 @@ async def api_align(
     audio: UploadFile = File(...),
     transcript: UploadFile = File(...),
     language: str = Form("en"),
+    mode: str = Form("spoken"),
 ):
     audio_path = None
     try:
@@ -271,7 +376,7 @@ async def api_align(
                 pass
             raise
 
-        result = align_transcript(audio_path, transcript_text, lang)
+        result = align_transcript(audio_path, transcript_text, lang, mode)
         result_clean = _make_serializable(result)
         segments = result_clean.get("segments") or []
         return JSONResponse(content={
@@ -279,27 +384,20 @@ async def api_align(
             "json": result_clean,
             "srt": generate_srt(segments),
             "csv": generate_csv(segments),
+            "lrc": generate_lrc(segments),
         })
 
     except HTTPException:
         raise
-    except FileNotFoundError as e:
-        if not shutil.which("ffmpeg"):
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "ffmpeg not found on PATH (required to decode audio). "
-                    "Install ffmpeg and ensure it is on your system PATH, then restart the server."
-                ),
-            ) from e
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    except subprocess.CalledProcessError as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"ffmpeg failed to decode audio: {e}") from e
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        detail = str(e)
+        if isinstance(e, FileNotFoundError) and not shutil.which("ffmpeg"):
+            detail = (
+                "ffmpeg not found on PATH (required to decode audio). "
+                "Install ffmpeg and ensure it is on your system PATH, then restart the server."
+            )
+        raise HTTPException(status_code=500, detail=detail) from e
     finally:
         if audio_path and os.path.isfile(audio_path):
             try:

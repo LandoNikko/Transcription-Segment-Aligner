@@ -8,6 +8,17 @@ echo ==============================================
 echo   Starting Transcription Segment Aligner backend
 echo ==============================================
 
+echo Checking for Demucs dependency...
+if not exist "venv\Scripts\demucs.exe" (
+    echo Demucs not found. Installing demucs...
+    venv\Scripts\python.exe -m pip install demucs
+    if !ERRORLEVEL! NEQ 0 (
+        echo Error installing demucs.
+        pause
+        exit /b 1
+    )
+)
+
 echo Checking port 8000...
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do (
   if not "%%a"=="" if not "%%a"=="0" (
